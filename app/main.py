@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from typing import List
 from fastapi import Query
@@ -10,6 +10,7 @@ import pandas as pd
 import random
 import time
 import os
+import base64
 
 
 app = FastAPI()
@@ -50,6 +51,46 @@ def get_chart(
     )
     
     return fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+@app.get("/api/chart_a", response_class=JSONResponse)
+def get_chart(
+    days: List[str] = Query(default=all_days), 
+    sexes: List[str] = Query(default=all_sexes)
+):
+    # 1. Validation
+    if not days or not sexes:
+        return {"error": "Please select at least one filter."}
+
+    filtered_df = df_raw[
+        (df_raw['day'].isin(days)) & 
+        (df_raw['sex'].isin(sexes))
+    ]
+    
+    if filtered_df.empty:
+         return {"error": "No data matches your filters."}
+         
+    agg_df = filtered_df.groupby(['day', 'sex'], as_index=False)['total_bill'].sum()
+
+    # 2. Create Figure
+    fig = px.bar(
+        agg_df, x="day", y="total_bill", color="sex", barmode='group',
+        title="Revenue"
+    )
+    
+    # 3. Generate HTML String (Interactive)
+    # full_html=False allows us to embed it in a div easily
+    chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
+    
+    # 4. Generate Image Bytes -> Base64 String (Static)
+    # 'to_image' returns raw bytes; we must encode them to string for JSON
+    img_bytes = fig.to_image(format="png", width=800, height=400, scale=2)
+    img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+    
+    # 5. Return Both
+    return {
+        "html_content": chart_html,
+        "image_base64": img_base64
+    }
 
 @app.get("/", response_class=HTMLResponse)
 def root():
